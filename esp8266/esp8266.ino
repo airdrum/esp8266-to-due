@@ -21,24 +21,44 @@ void setup() {
   pinMode(12,OUTPUT);
 digitalWrite(12,HIGH);
 }
-
+byte serialOut[128];
 void loop() {
     File dataFile = SPIFFS.open(file, "r");   //Open File for reading
-        Serial.println();
+    Serial.println();
     Serial.println("--------Reading Data from File-----------");
     //Data from file
     digitalWrite(12,LOW);
     delay(100);
     digitalWrite(12,HIGH);
     delay(10000);
-
-    for(int i=0;i<dataFile.size();i++) //Read upto complete file size
+    int dataSize = dataFile.size();
+    int inner_loop = floor(dataSize/128);
+    Serial.print(inner_loop);
+    int k = 0;
+    for(int i=0;i<inner_loop;i++) //Read upto complete file size
+    {
+      for(int j=0;j<128;j++)
+      {
+        serialOut[j] = dataFile.read();
+        delayMicroseconds(1);
+      }
+    Serial.print(i);Serial.println("-Print 128");
+      for(int m = 0; m < 128; m++)
+        {
+           Serial.print("0x");    //Read file
+          Serial.print(serialOut[m],HEX);
+          Serial.print(", ");    //Read file
+          delayMicroseconds(1);
+        }
+        Serial.println();
+    }
+    /*for(int i=0;i<dataFile.size();i++) //Read upto complete file size
     {
       Serial.print("0x");    //Read file
       Serial.print(dataFile.read(),HEX);    //Read file
       Serial.print(", ");    //Read file
       delayMicroseconds(10);
-    }
+    }*/
     Serial.println();
     dataFile.close();
     delay(5000);
