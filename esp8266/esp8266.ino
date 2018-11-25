@@ -7,60 +7,75 @@
 #include <ESP8266WiFi.h>
 #include <FS.h>   //Include File System Headers
 
+#define UART_DATA_SIZE 120
+#define MAX_NUMBER_OF_CHECKSUM 65535
+#define UART_PACKAGE_SIZE 128
+
+struct uart_transfer_format{
+  uint16_t header;
+  uint16_t sequence_package_number;
+  uint16_t total_package_number;
+  uint8_t data[120];
+  uint16_t checksum;
+};
+
+unsigned char uart_raw_data[UART_PACKAGE_SIZE];
+
 const char* file = "/blink.bin";   //Enter your file name
 void setup() {
   delay(10000);
   Serial.begin(115200);
-  //Serial.begin(115200);
-  Serial.println("Begin");
-
-  //Initialize File System
+  //Serial.println("Begin");
   SPIFFS.begin();
-  //esp8266.println("File System Initialized");
-  Serial.println("File System Initialized");
+  //Serial.println("File System Initialized");
   pinMode(12,OUTPUT);
-digitalWrite(12,HIGH);
+  digitalWrite(12,HIGH);
 }
 byte serialOut[128];
+File dataFile;
+uart_transfer_format uart_data;
+
 void loop() {
-    File dataFile = SPIFFS.open(file, "r");   //Open File for reading
-    Serial.println();
-    Serial.println("--------Reading Data from File-----------");
+    dataFile = SPIFFS.open(file, "r");   //Open File for reading
+    //Serial.println();
+    //Serial.println("--------Reading Data from File-----------");
     //Data from file
     digitalWrite(12,LOW);
     delay(100);
     digitalWrite(12,HIGH);
     delay(10000);
-    int dataSize = dataFile.size();
-    int inner_loop = floor(dataSize/128);
-    Serial.print(inner_loop);
-    int k = 0;
-    for(int i=0;i<inner_loop;i++) //Read upto complete file size
-    {
-      for(int j=0;j<128;j++)
-      {
-        serialOut[j] = dataFile.read();
-        delayMicroseconds(1);
+    int TotalSize = dataFile.size();
+    int inner_loop = ceil(TotalSize/UART_DATA_SIZE);
+    if (TotalSize % UART_DATA_SIZE)
+        inner_loop++;
+    
+    //Serial.print("Firmware Size is: ");Serial.println(TotalSize);
+    //Serial.print("Number of packets will be used: ");Serial.println(inner_loop);
+    uint16_t checksum;
+
+      uart_data.header = 0xABCD;
+      uart_data.total_package_number = inner_loop;
+    for(int i=0; i<uart_data.total_package_number; i++){
+      uart_data.sequence_package_number = i + 1;
+      for(int k=0; k<UART_DATA_SIZE; k++){
+        
+        uart_data.data[k] = dataFile.read();
+        checksum += uart_data.data[k];
+        
       }
-    Serial.print(i);Serial.println("-Print 128");
-      for(int m = 0; m < 128; m++)
-        {
-           Serial.print("0x");    //Read file
-          Serial.print(serialOut[m],HEX);
-          Serial.print(", ");    //Read file
-          delayMicroseconds(1);
-        }
-        Serial.println();
+      checksum += uart_data.sequence_package_number;
+      checksum += uart_data.total_package_number;
+      uart_data.header = 0xABCD;
+      uart_data.checksum = checksum;
+
+      memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
+     delayMicroseconds(1000);
+      for(int i=0; i<UART_PACKAGE_SIZE; i++)
+        Serial.print(uart_raw_data[i],HEX);
+        
     }
-    /*for(int i=0;i<dataFile.size();i++) //Read upto complete file size
-    {
-      Serial.print("0x");    //Read file
-      Serial.print(dataFile.read(),HEX);    //Read file
-      Serial.print(", ");    //Read file
-      delayMicroseconds(10);
-    }*/
-    Serial.println();
     dataFile.close();
     delay(5000);
+  
 
 }
