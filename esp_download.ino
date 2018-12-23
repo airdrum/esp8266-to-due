@@ -41,16 +41,16 @@ void setup(void){
   
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    //Serial.print(".");
   }
 
-  Serial.println("");
+  /*Serial.println("");
   Serial.println("WiFi connected");  
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
   Serial.println("\nConnected to "+WiFi.SSID()+" Use IP address: "+WiFi.localIP().toString()); // Report which SSID and IP is in use
   // The logical name http://fileserver.local will also access the device if you have 'Bonjour' running or your system supports multicast dns
-  if (!MDNS.begin(servername)) {          // Set your preferred server name, if you use "myserver" the address would be http://myserver.local/
+  */if (!MDNS.begin(servername)) {          // Set your preferred server name, if you use "myserver" the address would be http://myserver.local/
     Serial.println(F("Error setting up MDNS responder!")); 
     ESP.restart(); 
   } 
@@ -60,8 +60,8 @@ void setup(void){
   { server.send(200);}, handleFileUpload);
   ///////////////////////////// End of Request commands
   server.begin();
-  Serial.println("HTTP server started");
-  Serial.println("Ready to receive data");
+  //Serial.println("HTTP server started");
+  //Serial.println("Ready to receive data");
   pinMode(5,OUTPUT);
   digitalWrite(5,HIGH);
 }
@@ -70,6 +70,7 @@ byte serialOut[128];
 uart_transfer_format uart_data;
 bool initFile =true;
 void loop(void){
+  
   server.handleClient(); // Listen for client connections
   delay(10);
 }
@@ -102,7 +103,7 @@ int st = 0;
 void handleFileUpload(){ // upload a new file to the Filing system
   HTTPUpload& uploadfile = server.upload(); // See https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WebServer/srcv
 
-      Serial.printf("totalSize: %d\n",uploadfile.totalSize);
+      //Serial.printf("totalSize: %d\n",uploadfile.totalSize);
       /*Serial.println(HTTP_DOWNLOAD_UNIT_SIZE);
       Serial.printf("Filename: %s\n", uploadfile.filename.c_str());
       Serial.printf("totalSize: %d\n",uploadfile.totalSize);
@@ -110,17 +111,22 @@ void handleFileUpload(){ // upload a new file to the Filing system
   */
   if(uploadfile.status == UPLOAD_FILE_START)
   {
-     if (initFile){
+    digitalWrite(5,LOW);
+    delay(250);
+    digitalWrite(5,HIGH);
+    
+    delay(250);
+     /*if (initFile){
       TotalSize = uploadfile.totalSize;
       inner_loop = ceil(TotalSize/UART_DATA_SIZE);
       if (TotalSize % UART_DATA_SIZE)
         inner_loop++;
       initFile=false;
-    }
+    }*/
     String filename = uploadfile.filename;
     if(!filename.startsWith("/")) filename = "/"+filename;
-    //Serial.print("Upload File Name: "); Serial.println(filename);
     filename = String();
+    //Serial.println(filename);
     
   }
   else if (uploadfile.status == UPLOAD_FILE_WRITE)
@@ -133,13 +139,14 @@ void handleFileUpload(){ // upload a new file to the Filing system
       Serial.printf("0x%02X ",samet[i]);
       delayMicroseconds(10);
     }*/
-    Serial.print("********************PACKET*****************:   ");
+    /*Serial.print("********************PACKET*****************:   ");
     Serial.println(st);
-    int TotalSize = uploadfile.currentSize;
+    */int TotalSize = uploadfile.currentSize;
     int inner_loop = ceil(TotalSize/UART_DATA_SIZE);
     if (TotalSize % UART_DATA_SIZE)
         inner_loop++;
     
+   
     //Serial.print("Firmware Size is: ");Serial.println(TotalSize);
     //Serial.print("Number of packets will be used: ");Serial.println(inner_loop);
     uint16_t checksum;
@@ -148,13 +155,9 @@ void handleFileUpload(){ // upload a new file to the Filing system
       uart_data.total_package_number = inner_loop;
     for(int i=0; i<uart_data.total_package_number; i++){
       uart_data.sequence_package_number = i + 1;
-      Serial.print("Prepare: ");
       for(int k=0; k<UART_DATA_SIZE; k++){
-        
-        Serial.printf("%d-",k );
         uart_data.data[k] = samet[k];
         checksum += uart_data.data[k];
-        
       }
       checksum += uart_data.sequence_package_number;
       checksum += uart_data.total_package_number;
@@ -163,16 +166,16 @@ void handleFileUpload(){ // upload a new file to the Filing system
 
       memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
       delayMicroseconds(1000);
-      for(int i=0; i<UART_PACKAGE_SIZE; i++)
+      for(int i=0; i<UART_PACKAGE_SIZE; i++){
         Serial.print(uart_raw_data[i],HEX);
-
+      }
      
     }
   } 
   else if (uploadfile.status == UPLOAD_FILE_END)
   {
       initFile=true;
-      
+      st=0;
       
       webpage = "";
       append_page_header();
@@ -181,11 +184,7 @@ void handleFileUpload(){ // upload a new file to the Filing system
       webpage += uploadfile.filename+"</h2>";
       append_page_footer();
       server.send(200,"text/html",webpage);
-      delay(1000);
-      Serial.print("Size of uploadfile.totalSize: ");
-      Serial.println(uploadfile.totalSize);
-      Serial.print("*********************************");
-      
+      delay(1000);   
       
   }
 }
