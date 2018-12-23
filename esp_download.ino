@@ -1,84 +1,77 @@
-/*  Version 1
- *  
- *  ESP32/ESP8266 example of downloading and uploading a file from or to the ESP device's Filing System
- *  
- This software, the ideas and concepts is Copyright (c) David Bird 2018. All rights to this software are reserved.
- 
- Any redistribution or reproduction of any part or all of the contents in any form is prohibited other than the following:
- 1. You may print or download to a local hard disk extracts for your personal and non-commercial use only.
- 2. You may copy the content to individual third parties for their personal use, but only if you acknowledge the author David Bird as the source of the material.
- 3. You may not, except with my express written permission, distribute or commercially exploit the content.
- 4. You may not transmit it or store it in any other website or other form of electronic retrieval system for commercial purposes.
 
- The above copyright ('as annotated') notice and this permission notice shall be included in all copies or substantial portions of the Software and where the
- software use is visible to an end-user.
- 
- THE SOFTWARE IS PROVIDED "AS IS" FOR PRIVATE USE ONLY, IT IS NOT FOR COMMERCIAL USE IN WHOLE OR PART OR CONCEPT. FOR PERSONAL USE IT IS SUPPLIED WITHOUT WARRANTY 
- OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
- FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- See more at http://www.dsbird.org.uk
- *
-*/
 #include <ESP8266WiFi.h>       // Built-in
 #include <ESP8266WiFiMulti.h>  // Built-in
 #include <ESP8266WebServer.h>  // Built-in
 #include <ESP8266mDNS.h>
-//#include "Network.h"
-//#include "Sys_Variables.h"
-//#include "CSS.h"
-#include <SD.h> 
-#include <SPI.h>
 
 ESP8266WiFiMulti wifiMulti; 
 ESP8266WebServer server(80);
 // Adjust the following values to match your needs
 // -----------------------------------------------
+
+
 #define   servername "fileserver"  // Set your server's logical name here e.g. if 'myserver' then address is http://myserver.local/
-IPAddress local_IP(192, 168, 1, 24); // Set your server's fixed IP address here
-IPAddress gateway(192, 168, 1, 1);    // Set your network Gateway usually your Router base address
-IPAddress subnet(255, 255, 255, 0);   // Set your network sub-network mask here
-IPAddress dns(192,168,1,1);           // Set your network DNS usually your Router base address
-const char ssid_1[]     = "VULPUS_2G";
-const char password_1[] = "VULPUS2018";
+
+const char* ssid_1     = "********";
+const char* password_1 = "********";
 
 #define ServerVersion "1.0"
 String webpage = "";
-int j =0;
-bool initfile=true;
+
+#define UART_DATA_SIZE 120
+#define MAX_NUMBER_OF_CHECKSUM 65535
+#define UART_PACKAGE_SIZE 128
+
+struct uart_transfer_format{
+  uint16_t header;
+  uint16_t sequence_package_number;
+  uint16_t total_package_number;
+  uint8_t data[120];
+  uint16_t checksum;
+};
+
+unsigned char uart_raw_data[UART_PACKAGE_SIZE];
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void setup(void){
+  delay(10000);
   Serial.begin(115200);
-  if (!WiFi.config(local_IP, gateway, subnet, dns)) { //WiFi.config(ip, gateway, subnet, dns1, dns2);
-    Serial.println("WiFi STATION Failed to configure Correctly"); 
-  } 
-  wifiMulti.addAP(ssid_1, password_1);  // add Wi-Fi networks you want to connect to, it connects strongest to weakest
-
-  
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(ssid_1, password_1);
   Serial.println("Connecting ...");
-  while (wifiMulti.run() != WL_CONNECTED) { // Wait for the Wi-Fi to connect: scan for Wi-Fi networks, and connect to the strongest of the networks above
-    delay(250); Serial.print('.');
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
   }
+
+  Serial.println("");
+  Serial.println("WiFi connected");  
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
   Serial.println("\nConnected to "+WiFi.SSID()+" Use IP address: "+WiFi.localIP().toString()); // Report which SSID and IP is in use
   // The logical name http://fileserver.local will also access the device if you have 'Bonjour' running or your system supports multicast dns
   if (!MDNS.begin(servername)) {          // Set your preferred server name, if you use "myserver" the address would be http://myserver.local/
     Serial.println(F("Error setting up MDNS responder!")); 
     ESP.restart(); 
   } 
-
-  // Note: Using the ESP32 and SD_Card readers requires a 1K to 4K7 pull-up to 3v3 on the MISO line, otherwise they do-not function.
-  //----------------------------------------------------------------------   
-  ///////////////////////////// Server Commands 
   server.on("/",         HomePage);
   server.on("/upload",   File_Upload);
-  server.on("/fupload",  HTTP_POST,[](){ server.send(200);}, handleFileUpload);
+  server.on("/fupload",  HTTP_POST,[]()
+  { server.send(200);}, handleFileUpload);
   ///////////////////////////// End of Request commands
   server.begin();
   Serial.println("HTTP server started");
+  Serial.println("Ready to receive data");
+  pinMode(5,OUTPUT);
+  digitalWrite(5,HIGH);
 }
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+byte serialOut[128];
+uart_transfer_format uart_data;
+bool initFile =true;
 void loop(void){
   server.handleClient(); // Listen for client connections
+  delay(10);
 }
 
 // All supporting functions from here...
@@ -101,40 +94,99 @@ void File_Upload(){
   append_page_footer();
   server.send(200, "text/html",webpage);
 }
+
+int TotalSize;
+int inner_loop;
+int st = 0;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 void handleFileUpload(){ // upload a new file to the Filing system
   HTTPUpload& uploadfile = server.upload(); // See https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WebServer/srcv
 
-  
+      Serial.printf("totalSize: %d\n",uploadfile.totalSize);
+      /*Serial.println(HTTP_DOWNLOAD_UNIT_SIZE);
+      Serial.printf("Filename: %s\n", uploadfile.filename.c_str());
+      Serial.printf("totalSize: %d\n",uploadfile.totalSize);
+      Serial.printf("currentSize: %d\n",uploadfile.currentSize);
+  */
   if(uploadfile.status == UPLOAD_FILE_START)
   {
+     if (initFile){
+      TotalSize = uploadfile.totalSize;
+      inner_loop = ceil(TotalSize/UART_DATA_SIZE);
+      if (TotalSize % UART_DATA_SIZE)
+        inner_loop++;
+      initFile=false;
+    }
     String filename = uploadfile.filename;
     if(!filename.startsWith("/")) filename = "/"+filename;
-    Serial.print("Upload File Name: "); Serial.println(filename);
+    //Serial.print("Upload File Name: "); Serial.println(filename);
     filename = String();
     
   }
   else if (uploadfile.status == UPLOAD_FILE_WRITE)
   {
-    //Serial.printf("uploadfile.currentSize:%d\n",uploadfile.currentSize);
-    for (int i = 0; i < sizeof(uploadfile.buf); i++) {
-      //samet[j] = uploadfile.buf[i];
-      Serial.print(uploadfile.buf[i]);
-      delayMicroseconds(100);
-      j++;
+    byte *samet;
+    samet = uploadfile.buf;
+    delay(20);
+    st++;
+    /*for (int i = 0; i < uploadfile.currentSize; i++) {
+      Serial.printf("0x%02X ",samet[i]);
+      delayMicroseconds(10);
+    }*/
+    Serial.print("********************PACKET*****************:   ");
+    Serial.println(st);
+    int TotalSize = uploadfile.currentSize;
+    int inner_loop = ceil(TotalSize/UART_DATA_SIZE);
+    if (TotalSize % UART_DATA_SIZE)
+        inner_loop++;
+    
+    //Serial.print("Firmware Size is: ");Serial.println(TotalSize);
+    //Serial.print("Number of packets will be used: ");Serial.println(inner_loop);
+    uint16_t checksum;
+
+      uart_data.header = 0xABCD;
+      uart_data.total_package_number = inner_loop;
+    for(int i=0; i<uart_data.total_package_number; i++){
+      uart_data.sequence_package_number = i + 1;
+      Serial.print("Prepare: ");
+      for(int k=0; k<UART_DATA_SIZE; k++){
+        
+        Serial.printf("%d-",k );
+        uart_data.data[k] = samet[k];
+        checksum += uart_data.data[k];
+        
+      }
+      checksum += uart_data.sequence_package_number;
+      checksum += uart_data.total_package_number;
+      uart_data.header = 0xABCD;
+      uart_data.checksum = checksum;
+
+      memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
+      delayMicroseconds(1000);
+      for(int i=0; i<UART_PACKAGE_SIZE; i++)
+        Serial.print(uart_raw_data[i],HEX);
+
+     
     }
-      //Serial.println();
   } 
   else if (uploadfile.status == UPLOAD_FILE_END)
   {
-     j=0;
-      //Serial.print("Upload Size: "); Serial.println(uploadfile.totalSize);
+      initFile=true;
+      
+      
       webpage = "";
       append_page_header();
       webpage += F("<h3>File was successfully uploaded</h3>"); 
-      webpage += F("<h2>Uploaded File Name: "); webpage += uploadfile.filename+"</h2>";
+      webpage += F("<h2>Uploaded File Name: "); 
+      webpage += uploadfile.filename+"</h2>";
       append_page_footer();
       server.send(200,"text/html",webpage);
+      delay(1000);
+      Serial.print("Size of uploadfile.totalSize: ");
+      Serial.println(uploadfile.totalSize);
+      Serial.print("*********************************");
+      
+      
   }
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
