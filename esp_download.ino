@@ -1,4 +1,3 @@
-
 #include <ESP8266WiFi.h>       // Built-in
 #include <ESP8266WiFiMulti.h>  // Built-in
 #include <ESP8266WebServer.h>  // Built-in
@@ -12,8 +11,8 @@ ESP8266WebServer server(80);
 
 #define   servername "fileserver"  // Set your server's logical name here e.g. if 'myserver' then address is http://myserver.local/
 
-const char* ssid_1     = "********";
-const char* password_1 = "********";
+const char* ssid_1     = "****";
+const char* password_1 = "****";
 
 #define ServerVersion "1.0"
 String webpage = "";
@@ -26,7 +25,7 @@ struct uart_transfer_format{
   uint16_t header;
   uint16_t sequence_package_number;
   uint16_t total_package_number;
-  uint8_t data[120];
+  uint8_t data[UART_DATA_SIZE];
   uint16_t checksum;
 };
 
@@ -37,7 +36,7 @@ void setup(void){
   Serial.begin(115200);
   WiFi.mode(WIFI_AP_STA);
   WiFi.begin(ssid_1, password_1);
-  Serial.println("Connecting ...");
+  //Serial.println("Connecting ...");
   
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -48,9 +47,9 @@ void setup(void){
   Serial.println("WiFi connected");  
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
-  Serial.println("\nConnected to "+WiFi.SSID()+" Use IP address: "+WiFi.localIP().toString()); // Report which SSID and IP is in use
+  Serial.println("\nConnected to "+WiFi.SSID()+" Use IP address: "+WiFi.localIP().toString()); // Report which SSID and IP is in use*/
   // The logical name http://fileserver.local will also access the device if you have 'Bonjour' running or your system supports multicast dns
-  */if (!MDNS.begin(servername)) {          // Set your preferred server name, if you use "myserver" the address would be http://myserver.local/
+  if (!MDNS.begin(servername)) {          // Set your preferred server name, if you use "myserver" the address would be http://myserver.local/
     Serial.println(F("Error setting up MDNS responder!")); 
     ESP.restart(); 
   } 
@@ -98,17 +97,11 @@ void File_Upload(){
 
 int TotalSize;
 int inner_loop;
-int st = 0;
+int sq_count = 0;
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 void handleFileUpload(){ // upload a new file to the Filing system
-  HTTPUpload& uploadfile = server.upload(); // See https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WebServer/srcv
-
-      //Serial.printf("totalSize: %d\n",uploadfile.totalSize);
-      /*Serial.println(HTTP_DOWNLOAD_UNIT_SIZE);
-      Serial.printf("Filename: %s\n", uploadfile.filename.c_str());
-      Serial.printf("totalSize: %d\n",uploadfile.totalSize);
-      Serial.printf("currentSize: %d\n",uploadfile.currentSize);
-  */
+  HTTPUpload& uploadfile = server.upload();
+      //Serial.printf("\ncurrentSize: %d\n",uploadfile.currentSize);
   if(uploadfile.status == UPLOAD_FILE_START)
   {
     digitalWrite(5,LOW);
@@ -116,51 +109,38 @@ void handleFileUpload(){ // upload a new file to the Filing system
     digitalWrite(5,HIGH);
     
     delay(250);
-     /*if (initFile){
-      TotalSize = uploadfile.totalSize;
-      inner_loop = ceil(TotalSize/UART_DATA_SIZE);
-      if (TotalSize % UART_DATA_SIZE)
-        inner_loop++;
-      initFile=false;
-    }*/
     String filename = uploadfile.filename;
     if(!filename.startsWith("/")) filename = "/"+filename;
-    filename = String();
-    //Serial.println(filename);
-    
+    filename = String();    
   }
   else if (uploadfile.status == UPLOAD_FILE_WRITE)
   {
     byte *samet;
     samet = uploadfile.buf;
     delay(20);
-    st++;
+    sq_count++;
     /*for (int i = 0; i < uploadfile.currentSize; i++) {
       Serial.printf("0x%02X ",samet[i]);
       delayMicroseconds(10);
-    }*/
-    /*Serial.print("********************PACKET*****************:   ");
-    Serial.println(st);
-    */int TotalSize = uploadfile.currentSize;
+    }
+    Serial.print("********************PACKET*****************:   ");
+    Serial.println(st);*/
+    /*int TotalSize = uploadfile.currentSize;
     int inner_loop = ceil(TotalSize/UART_DATA_SIZE);
     if (TotalSize % UART_DATA_SIZE)
         inner_loop++;
-    
-   
-    //Serial.print("Firmware Size is: ");Serial.println(TotalSize);
-    //Serial.print("Number of packets will be used: ");Serial.println(inner_loop);
-    uint16_t checksum;
-
+    */
+    if(uploadfile.currentSize==UART_DATA_SIZE){
+      uint16_t checksum;
       uart_data.header = 0xABCD;
-      uart_data.total_package_number = inner_loop;
-    for(int i=0; i<uart_data.total_package_number; i++){
-      uart_data.sequence_package_number = i + 1;
+      uart_data.total_package_number = MAX_NUMBER_OF_CHECKSUM;
+      uart_data.sequence_package_number = sq_count;
       for(int k=0; k<UART_DATA_SIZE; k++){
         uart_data.data[k] = samet[k];
         checksum += uart_data.data[k];
       }
       checksum += uart_data.sequence_package_number;
-      checksum += uart_data.total_package_number;
+      checksum += MAX_NUMBER_OF_CHECKSUM;//uart_data.total_package_number;
       uart_data.header = 0xABCD;
       uart_data.checksum = checksum;
 
@@ -169,14 +149,30 @@ void handleFileUpload(){ // upload a new file to the Filing system
       for(int i=0; i<UART_PACKAGE_SIZE; i++){
         Serial.print(uart_raw_data[i],HEX);
       }
-     
+    }else{
+      uint16_t checksum;
+      uart_data.header = 0xABCD;
+      uart_data.total_package_number = sq_count;
+      uart_data.sequence_package_number = sq_count;
+      for(int k=0; k<UART_DATA_SIZE; k++){
+        uart_data.data[k] = samet[k];
+        checksum += uart_data.data[k];
+      }
+      checksum += uart_data.sequence_package_number;
+      checksum += sq_count;//uart_data.total_package_number;
+      uart_data.header = 0xABCD;
+      uart_data.checksum = checksum;
+
+      memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
+      delayMicroseconds(1000);
+      for(int i=0; i<UART_PACKAGE_SIZE; i++){
+        Serial.print(uart_raw_data[i],HEX);
+      }
     }
   } 
   else if (uploadfile.status == UPLOAD_FILE_END)
   {
-      initFile=true;
-      st=0;
-      
+      sq_count=0;
       webpage = "";
       append_page_header();
       webpage += F("<h3>File was successfully uploaded</h3>"); 
@@ -287,11 +283,7 @@ void append_page_header() {
 void append_page_footer(){ // Saves repeating many lines of code for HTML page footers
   webpage += F("<ul>");
   webpage += F("<li><a href='/'>Home</a></li>"); // Lower Menu bar command entries
-  //webpage += F("<li><a href='/download'>Download</a></li>"); 
   webpage += F("<li><a href='/upload'>Upload</a></li>"); 
   webpage += F("</ul>");
- /* webpage += "<footer>&copy;"+String(char(byte(0x40>>1)))+String(char(byte(0x88>>1)))+String(char(byte(0x5c>>1)))+String(char(byte(0x98>>1)))+String(char(byte(0x5c>>1)));
-  webpage += String(char((0x84>>1)))+String(char(byte(0xd2>>1)))+String(char(0xe4>>1))+String(char(0xc8>>1))+String(char(byte(0x40>>1)));
-  webpage += String(char(byte(0x64/2)))+String(char(byte(0x60>>1)))+String(char(byte(0x62>>1)))+String(char(0x70>>1))+"</footer>";*/
   webpage += F("</body></html>");
 }
