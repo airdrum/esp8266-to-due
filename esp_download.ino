@@ -115,48 +115,47 @@ void handleFileUpload(){ // upload a new file to the Filing system
   }
   else if (uploadfile.status == UPLOAD_FILE_WRITE)
   {
-    byte *samet;
-    samet = uploadfile.buf;
+    byte *sendFile;
+    sendFile = uploadfile.buf;
+    sendFile[uploadfile.currentSize] = NULL;
     delay(20);
     sq_count++;
-    /*for (int i = 0; i < uploadfile.currentSize; i++) {
-      Serial.printf("0x%02X ",samet[i]);
-      delayMicroseconds(10);
-    }
-    Serial.print("********************PACKET*****************:   ");
-    Serial.println(st);*/
-    /*int TotalSize = uploadfile.currentSize;
-    int inner_loop = ceil(TotalSize/UART_DATA_SIZE);
-    if (TotalSize % UART_DATA_SIZE)
-        inner_loop++;
-    */
-    if(uploadfile.currentSize==UART_DATA_SIZE){
-      uint16_t checksum;
-      uart_data.header = 0xABCD;
-      uart_data.total_package_number = MAX_NUMBER_OF_CHECKSUM;
-      uart_data.sequence_package_number = sq_count;
-      for(int k=0; k<UART_DATA_SIZE; k++){
-        uart_data.data[k] = samet[k];
+    
+    uint16_t checksum;
+    uart_data.header = 0xABCD;
+    uart_data.total_package_number = MAX_NUMBER_OF_CHECKSUM;
+    uart_data.sequence_package_number = sq_count;
+    for(int k=0; k<UART_DATA_SIZE; k++){
+      if(k<uploadfile.currentSize){
+        uart_data.data[k] = sendFile[k];
+        checksum += uart_data.data[k];
+      }else{
+        uart_data.data[k] = 0xFF;
         checksum += uart_data.data[k];
       }
-      checksum += uart_data.sequence_package_number;
-      checksum += MAX_NUMBER_OF_CHECKSUM;//uart_data.total_package_number;
-      uart_data.header = 0xABCD;
-      uart_data.checksum = checksum;
+    }
+    checksum += uart_data.sequence_package_number;
+    checksum += MAX_NUMBER_OF_CHECKSUM;//uart_data.total_package_number;
+    uart_data.header = 0xABCD;
+    uart_data.checksum = checksum;
 
-      memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
-      delayMicroseconds(1000);
-      for(int i=0; i<UART_PACKAGE_SIZE; i++){
-        Serial.print(uart_raw_data[i],HEX);
-      }
-    }else{
+    memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
+    delayMicroseconds(1000);
+    for(int i=0; i<UART_PACKAGE_SIZE; i++){
+      Serial.write(uart_raw_data[i]);//Serial.printf("0x%02X ",uart_raw_data[i]);//
+    }
+    delay(150);
+  }
+  else if (uploadfile.status == UPLOAD_FILE_END)
+  {
+      
       uint16_t checksum;
       uart_data.header = 0xABCD;
       uart_data.total_package_number = sq_count;
       uart_data.sequence_package_number = sq_count;
       for(int k=0; k<UART_DATA_SIZE; k++){
-        uart_data.data[k] = samet[k];
-        checksum += uart_data.data[k];
+          uart_data.data[k] = 0xFF;
+          checksum += uart_data.data[k];
       }
       checksum += uart_data.sequence_package_number;
       checksum += sq_count;//uart_data.total_package_number;
@@ -166,12 +165,9 @@ void handleFileUpload(){ // upload a new file to the Filing system
       memcpy(&uart_raw_data[0], (unsigned char *)&uart_data, UART_PACKAGE_SIZE);
       delayMicroseconds(1000);
       for(int i=0; i<UART_PACKAGE_SIZE; i++){
-        Serial.print(uart_raw_data[i],HEX);
+        Serial.write(uart_raw_data[i]);//Serial.printf("0x%02X ",uart_raw_data[i]);
       }
-    }
-  } 
-  else if (uploadfile.status == UPLOAD_FILE_END)
-  {
+      delay(150);
       sq_count=0;
       webpage = "";
       append_page_header();
