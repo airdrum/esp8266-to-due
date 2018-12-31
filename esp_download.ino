@@ -151,6 +151,7 @@ void handleFileUpload(){ // upload a new file to the Filing system
       
       uint16_t checksum;
       uart_data.header = 0xABCD;
+      sq_count++;
       uart_data.total_package_number = sq_count;
       uart_data.sequence_package_number = sq_count;
       for(int k=0; k<UART_DATA_SIZE; k++){
